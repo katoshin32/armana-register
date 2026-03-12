@@ -511,6 +511,7 @@ input[type="file"] { display: none; }
             <option value="刑事">刑事</option>
             <option value="企業法務">企業法務</option>
             <option value="障害年金">障害年金</option>
+            <option value="トレント">トレント</option>
           </select>
         </div>
         <div class="form-group">
@@ -695,7 +696,7 @@ input[type="file"] { display: none; }
           </div>
           <div class="form-group">
             <label>関係 <span class="param-name">visitor_target_relation</span></label>
-            <input type="text" id="f_visitor_target_relation" placeholder="例：母、配偶者">
+            <input type="text" id="f_visitor_target_relation" placeholder="本人の場合は空欄（例：母、配偶者）">
           </div>
           <div class="form-group">
             <label>名前特記 <span class="param-name">visitor_name_confirm</span></label>
@@ -1079,8 +1080,8 @@ async function startAnalysis() {
 
 ■ 抽出フィールド（値が読み取れない場合は空文字""）:
 {
-  "contact_type": "案件種別（一般/交通事故/離婚/相続/債務整理/労働/不動産/債権回収/刑事/企業法務/障害年金 のいずれか）",
-  "sub_contact_type": "サブカテゴリ（例：名誉毀損、養育費、後遺障害等級、過払い金等、具体的に）",
+  "contact_type": "案件種別（一般/交通事故/離婚/相続/債務整理/労働/不動産/債権回収/刑事/企業法務/障害年金/トレント のいずれか。BitTorrent関連の著作権侵害案件は必ず「トレント」を選択）",
+  "sub_contact_type": "サブカテゴリ（例：名誉毀損、養育費、後遺障害等級、過払い金等、具体的に。ただしcontact_typeが「トレント」の場合は空文字にする）",
   "contact_at": "問い合わせ日時（ISO 8601形式、例：2026-03-11T13:00:00+09:00）",
   "company_name": "依頼者（当事者）の法人名",
   "company_name_kana": "法人名カナ",
@@ -1096,7 +1097,7 @@ async function startAnalysis() {
   "address_city": "市区町村以降の住所",
   "address_building": "建物名・部屋番号",
   "gender": "性別（male/female/空文字）",
-  "age": "年齢（数値または空文字）",
+  "age": "年齢（数値または空文字。身分証明書・マイナンバーカード・運転免許証等に生年月日が記載されている場合は、そこから現在日時点の年齢を算出すること）",
   "opponent_company_name": "相手方の法人名",
   "opponent_company_name_kana": "相手方の法人名カナ",
   "opponent_family_name": "相手方の姓（本名不明の場合はハンドルネームや通称を入れる）",
@@ -1106,11 +1107,11 @@ async function startAnalysis() {
   "opponent_name_confirm": "相手方の名前に関する特記（例：ハンドルネームのみ判明、通称等）",
   "opponent_attorney_name": "相手方代理人の弁護士名（該当がある場合）",
   "opponent_attorney_firm": "相手方代理人の法律事務所名（該当がある場合）",
-  "visitor_family_name": "相談者の姓（当事者と同一の場合は空文字）",
-  "visitor_first_name": "相談者の名（当事者と同一の場合は空文字）",
-  "visitor_target_relation": "相談者と当事者の関係（例：母、配偶者、本人。本人の場合は空文字）",
-  "visitor_phone1": "相談者の電話番号（当事者と同一の場合は空文字）",
-  "visitor_mail": "相談者のメール（当事者と同一の場合は空文字）",
+  "visitor_family_name": "相談者の姓（当事者本人が相談者の場合は必ず空文字。家族等の代理相談の場合のみ記載）",
+  "visitor_first_name": "相談者の名（当事者本人が相談者の場合は必ず空文字。家族等の代理相談の場合のみ記載）",
+  "visitor_target_relation": "相談者と当事者の関係（例：父、母、配偶者、子、友人等）。重要：当事者本人が相談している場合は必ず空文字にすること。「本人」と入れてはいけない。visitor_target_relationに値を入れるのは、相談者と当事者が別人の場合のみ",
+  "visitor_phone1": "相談者の電話番号（当事者本人が相談者の場合は必ず空文字）",
+  "visitor_mail": "相談者のメール（当事者本人が相談者の場合は必ず空文字）",
   "content": "問い合わせ・相談内容の要約（300〜500字程度。主訴、経緯、希望する対応を含める。簡潔だが重要事実は省略しない）",
   "memo": "詳細な相談メモ（以下の構成で、該当する項目をすべて記載すること）：\n【事案の経緯】時系列で事実関係を整理\n【決定事項】面談・相談で決まったこと（方針、受任の可否、次のステップ等）\n【費用・金額】着手金・報酬・実費見込み・相手方への請求額・和解金額・慰謝料・養育費・財産分与額・損害賠償額等、金銭に関する情報はすべて記載\n【今後の対応】次にやるべきこと・宿題・期限\n【重要事実】争点になりうる事実、証拠の有無、相手方の態度・主張\n【特記事項】相手方代理人情報、依頼者の要望・懸念、連絡上の注意等\n※議事録・面談記録・文字起こしの場合は特に詳細に記載し、決定事項と金額情報は絶対に漏らさないこと",
   "form_type": "相談の種別（電話相談/来所相談/メール相談/Web会議/LINE相談 等）",
@@ -1465,25 +1466,31 @@ function buildPayload() {
   const age = document.getElementById('f_age').value;
   if (age) payload.age = parseInt(age);
 
-  // Visitor
-  addIfNotEmpty('visitor_company_name', document.getElementById('f_visitor_company_name').value);
-  addIfNotEmpty('visitor_company_name_kana', document.getElementById('f_visitor_company_name_kana').value);
-  addIfNotEmpty('visitor_family_name', document.getElementById('f_visitor_family_name').value);
-  addIfNotEmpty('visitor_first_name', document.getElementById('f_visitor_first_name').value);
-  addIfNotEmpty('visitor_family_name_kana', document.getElementById('f_visitor_family_name_kana').value);
-  addIfNotEmpty('visitor_first_name_kana', document.getElementById('f_visitor_first_name_kana').value);
-  addIfNotEmpty('visitor_name_confirm', document.getElementById('f_visitor_name_confirm').value);
-  addIfNotEmpty('visitor_target_relation', document.getElementById('f_visitor_target_relation').value);
+  // Visitor（visitor_target_relationが空 or 「本人」の場合はvisitor系を送信しない）
+  const vRelation = document.getElementById('f_visitor_target_relation').value.trim();
+  const isVisitorSameAsPerson = !vRelation || vRelation === '本人';
+  if (!isVisitorSameAsPerson) {
+    addIfNotEmpty('visitor_company_name', document.getElementById('f_visitor_company_name').value);
+    addIfNotEmpty('visitor_company_name_kana', document.getElementById('f_visitor_company_name_kana').value);
+    addIfNotEmpty('visitor_family_name', document.getElementById('f_visitor_family_name').value);
+    addIfNotEmpty('visitor_first_name', document.getElementById('f_visitor_first_name').value);
+    addIfNotEmpty('visitor_family_name_kana', document.getElementById('f_visitor_family_name_kana').value);
+    addIfNotEmpty('visitor_first_name_kana', document.getElementById('f_visitor_first_name_kana').value);
+    addIfNotEmpty('visitor_name_confirm', document.getElementById('f_visitor_name_confirm').value);
+    addIfNotEmpty('visitor_target_relation', vRelation);
+  }
 
-  const vPhone = document.getElementById('f_visitor_phone1').value;
-  if (vPhone) payload.visitor_phone = [{ number: vPhone }];
-  addIfNotEmpty('visitor_mail', document.getElementById('f_visitor_mail').value);
+  if (!isVisitorSameAsPerson) {
+    const vPhone = document.getElementById('f_visitor_phone1').value;
+    if (vPhone) payload.visitor_phone = [{ number: vPhone }];
+    addIfNotEmpty('visitor_mail', document.getElementById('f_visitor_mail').value);
+  }
 
   const vPostcode = document.getElementById('f_visitor_address_postcode').value;
   const vPref = document.getElementById('f_visitor_address_prefecture').value;
   const vCity = document.getElementById('f_visitor_address_city').value;
   const vBuilding = document.getElementById('f_visitor_address_building').value;
-  if (vPostcode || vPref || vCity || vBuilding) {
+  if (!isVisitorSameAsPerson && (vPostcode || vPref || vCity || vBuilding)) {
     payload.visitor_address = [{}];
     if (vPostcode) payload.visitor_address[0].postcode = vPostcode;
     if (vPref) payload.visitor_address[0].prefecture = vPref;
