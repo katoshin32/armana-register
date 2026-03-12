@@ -1153,7 +1153,7 @@ async function startAnalysis() {
       }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 8192
+        maxOutputTokens: 16384
       }
     };
 
@@ -1203,25 +1203,71 @@ async function startAnalysis() {
 
     // Parse JSON from response
     let jsonStr = rawText;
-    // Remove markdown code block if present
-    const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) jsonStr = jsonMatch[1];
+
+    // Remove markdown code block markers (handle both complete and truncated)
+    // First try complete ```json ... ```
+    const jsonMatchComplete = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatchComplete) {
+      jsonStr = jsonMatchComplete[1];
+    } else {
+      // Handle truncated response: remove opening ```json without closing ```
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '');
+      jsonStr = jsonStr.replace(/```\s*$/, '');
+    }
     jsonStr = jsonStr.trim();
 
-    try {
-      aiAnalysisResult = JSON.parse(jsonStr);
-    } catch (parseErr) {
-      // Try to find JSON object in the text
-      const objMatch = rawText.match(/\{[\s\S]*\}/);
-      if (objMatch) {
-        try {
-          aiAnalysisResult = JSON.parse(objMatch[0]);
-        } catch (e) {
-          throw new Error('AIレスポンスからJSONを解析できませんでした。\n\nレスポンス冒頭: ' + rawText.substring(0, 300));
-        }
-      } else {
-        throw new Error('AIレスポンスにJSON形式のデータが見つかりませんでした。\n\nレスポンス冒頭: ' + rawText.substring(0, 300));
+    // Try parsing JSON, with truncation repair
+    function tryParseJSON(str) {
+      try {
+        return JSON.parse(str);
+      } catch (e) {
+        return null;
       }
+    }
+
+    aiAnalysisResult = tryParseJSON(jsonStr);
+
+    if (!aiAnalysisResult) {
+      // Extract from first { to last }
+      const objMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        aiAnalysisResult = tryParseJSON(objMatch[0]);
+      }
+    }
+
+    if (!aiAnalysisResult) {
+      // JSON may be truncated (maxOutputTokens reached) - try to repair
+      let repairable = jsonStr;
+      // Find the first {
+      const braceStart = repairable.indexOf('{');
+      if (braceStart >= 0) {
+        repairable = repairable.substring(braceStart);
+        // Remove trailing incomplete key-value (after last comma or colon)
+        repairable = repairable.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '');
+        repairable = repairable.replace(/,\s*"[^"]*$/, '');
+        repairable = repairable.replace(/,\s*$/, '');
+        // Count unmatched braces/brackets and close them
+        let braces = 0, brackets = 0, inStr = false, escape = false;
+        for (const ch of repairable) {
+          if (escape) { escape = false; continue; }
+          if (ch === '\\') { escape = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === '{') braces++;
+          if (ch === '}') braces--;
+          if (ch === '[') brackets++;
+          if (ch === ']') brackets--;
+        }
+        // Close unclosed string
+        if (inStr) repairable += '"';
+        while (brackets > 0) { repairable += ']'; brackets--; }
+        while (braces > 0) { repairable += '}'; braces--; }
+        aiAnalysisResult = tryParseJSON(repairable);
+      }
+    }
+
+    if (!aiAnalysisResult) {
+      throw new Error('AIレスポンスからJSONを解析できませんでした。レスポンスが途中で切れている可能性があります。\n\nレスポンス冒頭: ' + rawText.substring(0, 300));
     }
 
     // Fill extracted text
