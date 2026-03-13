@@ -863,6 +863,18 @@ input[type="file"] { display: none; }
         </div>
       </div>
 
+      <!-- AI Chat Edit -->
+      <div style="margin-top:24px; padding:16px; background:#f0f4ff; border-radius:8px; border:1px solid #c7d2fe;">
+        <h3 style="margin:0 0 8px 0; font-size:15px; color:#4338ca;">AIに修正を指示</h3>
+        <p style="color:#6366a0; font-size:13px; margin:0 0 10px 0;">自然言語で修正指示を入力できます（例：「依頼者の名前を山田太郎に変更して」「相手方代理人を削除して」）</p>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="chatEditInput" placeholder="修正指示を入力..." style="flex:1; padding:10px 12px; border:1px solid #c7d2fe; border-radius:6px; font-size:14px;">
+          <button class="btn btn-primary" id="chatEditBtn" onclick="chatEditForm()" style="white-space:nowrap;">修正実行</button>
+        </div>
+        <div id="chatEditStatus" style="margin-top:8px; font-size:13px; color:#6366a0; display:none;"></div>
+        <div id="chatEditHistory" style="margin-top:8px; font-size:13px;"></div>
+      </div>
+
       <div class="btn-group">
         <button class="btn btn-outline" onclick="goToStep(2)">&#8592; 戻る</button>
         <button class="btn btn-outline" onclick="previewJson()">JSONプレビュー</button>
@@ -1080,11 +1092,23 @@ async function startAnalysis() {
 訴訟書面の場合の判断方法：
 - 訴状・準備書面等で「原告代理人 加藤信」「被告代理人 加藤信」等と記載されている場合、加藤信が代理している側（原告または被告）が依頼者です。
 - 相手方の代理人弁護士の情報は、opponent_attorney_name / opponent_attorney_firm に入れてください。
-- 加藤信・冨田・島岡法律事務所の情報は相手方代理人に入れないでください。
+- 以下は依頼者側の代理人であり、絶対に相手方代理人に入れないでください：
+  ・弁護士 加藤信
+  ・冨田・島岡法律事務所（冨田島岡、とみだしまおか等の表記揺れも含む）
 
 交渉書面の場合の判断方法：
 - 「通知人代理人 加藤信」「回答者代理人 加藤信」等の記載があれば、その通知人・回答者側が依頼者です。
 - 書面の差出人が加藤信であれば、書面の送付先（宛先）側が相手方です。
+
+トレント（BitTorrent）案件の場合の注意：
+- 相手方は著作権者・コンテンツメーカー側（またはその委託を受けた法律事務所）です。
+- ISP（プロバイダ：NTT、KDDI、ソフトバンク、ソニーネットワークコミュニケーションズ等）やその代理人弁護士は相手方ではありません。ISP代理人の情報はmemoの【特記事項】に記載してください。
+- 開示請求の申立人側の法律事務所（例：ITJ法律事務所等）が相手方代理人です。
+
+■ 情報抽出の原則
+- 依頼者と相手方を識別したら、それぞれの氏名・住所・連絡先等の情報をドキュメントから必ず抽出してください。
+- 訴状・準備書面・判決等には、原告・被告双方の氏名・住所が記載されています。依頼者側の情報をfamily_name, first_name, address等のフィールドに、相手方側の情報をopponent_family_name, opponent_first_name等に入れてください。
+- 複数のドキュメントがある場合、すべてのドキュメントから情報を集約してください。あるドキュメントに氏名があり、別のドキュメントに住所がある場合は両方を抽出してください。
 
 ■ 抽出ルール
 1. 「依頼者（当事者）」と「相談者」が異なる場合があります（例：家族が代わりに相談）。文脈から判断してください。
@@ -1640,6 +1664,134 @@ function previewJson() {
   document.getElementById('jsonModalContent').textContent = JSON.stringify(payload, null, 2);
   document.getElementById('jsonModal').classList.add('show');
 }
+
+// Chat-based form editing
+async function chatEditForm() {
+  const input = document.getElementById('chatEditInput');
+  const statusEl = document.getElementById('chatEditStatus');
+  const historyEl = document.getElementById('chatEditHistory');
+  const btn = document.getElementById('chatEditBtn');
+  const instruction = input.value.trim();
+  if (!instruction) return;
+
+  const settings = loadSettings();
+  if (!settings.geminiKey) {
+    statusEl.style.display = 'block';
+    statusEl.innerHTML = '<span style="color:red">Gemini APIキーが未設定です。</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '処理中...';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'AIが修正を処理しています...';
+
+  // Collect current form values
+  const currentData = {};
+  const allFields = [
+    'f_contact_type','f_sub_contact_type','f_contact_at','f_form_type','f_channel',
+    'f_media','f_new_customer','f_company_name','f_company_name_kana',
+    'f_family_name','f_first_name','f_family_name_kana','f_first_name_kana',
+    'f_phone1','f_phone2','f_mail','f_address_postcode','f_address_prefecture',
+    'f_address_city','f_address_building','f_gender','f_age',
+    'f_visitor_company_name','f_visitor_family_name','f_visitor_first_name',
+    'f_visitor_target_relation','f_visitor_phone1','f_visitor_mail',
+    'f_opponent_company_name','f_opponent_company_name_kana',
+    'f_opponent_family_name','f_opponent_first_name',
+    'f_opponent_family_name_kana','f_opponent_first_name_kana',
+    'f_opponent_name_confirm','f_opponent_attorney_name','f_opponent_attorney_firm',
+    'f_content','f_memo','f_trigger_inquiry','f_has_competitor',
+    'f_callback_time','f_phone_attention','f_client_channel',
+    'f_responded_explanation','f_person_in_charge'
+  ];
+  allFields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) currentData[id.replace('f_','')] = el.value || '';
+  });
+
+  const editPrompt = `あなたは法律事務所の案件登録システムのアシスタントです。
+現在のフォームの値は以下のとおりです：
+${JSON.stringify(currentData, null, 2)}
+
+ユーザーからの修正指示：「${instruction}」
+
+この指示に従い、変更が必要なフィールドのみをJSON形式で返してください。
+変更不要なフィールドは含めないでください。
+フィールド名はそのまま使用してください（例：family_name, content, memo等）。
+JSONのみを返してください（説明文は不要）。
+値を削除する場合は空文字""を設定してください。`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${settings.geminiModel}:generateContent?key=${settings.geminiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: editPrompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 4096 }
+        })
+      }
+    );
+
+    if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+    const data = await response.json();
+    let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    rawText = rawText.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '').trim();
+
+    const braceStart = rawText.indexOf('{');
+    const braceEnd = rawText.lastIndexOf('}');
+    if (braceStart >= 0 && braceEnd > braceStart) {
+      rawText = rawText.substring(braceStart, braceEnd + 1);
+    }
+
+    const changes = JSON.parse(rawText);
+    const changedFields = [];
+
+    for (const [key, value] of Object.entries(changes)) {
+      const el = document.getElementById('f_' + key);
+      if (el) {
+        const oldVal = el.value;
+        el.value = value;
+        el.classList.add('ai-filled');
+        if (oldVal !== value) {
+          changedFields.push(`${key}: 「${oldVal || '(空)'}」→「${value || '(空)'}」`);
+        }
+      }
+    }
+
+    if (changedFields.length > 0) {
+      statusEl.innerHTML = `<span style="color:#059669">✓ ${changedFields.length}件のフィールドを修正しました</span>`;
+      const historyItem = document.createElement('div');
+      historyItem.style.cssText = 'padding:6px 8px; margin-top:4px; background:white; border-radius:4px; border:1px solid #e5e7eb; font-size:12px;';
+      historyItem.innerHTML = `<strong style="color:#4338ca;">指示:</strong> ${instruction}<br><strong style="color:#059669;">変更:</strong> ${changedFields.join('、 ')}`;
+      historyEl.prepend(historyItem);
+    } else {
+      statusEl.innerHTML = '<span style="color:#d97706">変更対象のフィールドが見つかりませんでした。</span>';
+    }
+
+    input.value = '';
+  } catch (err) {
+    statusEl.innerHTML = `<span style="color:red">エラー: ${err.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '修正実行';
+  }
+}
+
+// Enter key for chat edit
+document.addEventListener('DOMContentLoaded', () => {
+  const chatInput = document.getElementById('chatEditInput');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        chatEditForm();
+      }
+    });
+  }
+});
 
 // Remove ai-filled class on edit
 document.addEventListener('input', e => {
