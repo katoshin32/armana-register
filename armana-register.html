@@ -1164,12 +1164,11 @@ async function startAnalysis() {
   "client_channel": "希望の連絡方法（文字列の配列。例：[\"電話\", \"メール\"]）",
   "divorce_info_procedure_status": "離婚案件の手続き状況（該当する場合のみ。協議中/調停前/調停中/訴訟前/訴訟中 等）",
   "divorce_info_consultation_type": "離婚案件の相談種別（該当する場合のみ。離婚/養育費/財産分与/慰謝料 等）",
-  "disability_disease_name": "障害名/病名（障害年金案件の場合のみ）",
-  "extracted_text": "ドキュメントから読み取った全テキスト（OCR結果。原文をそのまま記載）"
+  "disability_disease_name": "障害名/病名（障害年金案件の場合のみ）"
 }
 
 ■ 注意:
-- JSONのみを返してください（マークダウンのコードブロック記号は不要です）
+- JSONのみを返してください（マークダウンのコードブロック記号 \`\`\` は絶対に付けないでください。純粋なJSONだけを出力してください）
 - 値が読み取れない場合は空文字""にしてください
 - 日本語の書類を想定しています
 - 手書きの場合も最善を尽くして読み取ってください
@@ -1193,7 +1192,7 @@ async function startAnalysis() {
       }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 16384
+        maxOutputTokens: 65536
       }
     };
 
@@ -1310,10 +1309,12 @@ async function startAnalysis() {
       throw new Error('AIレスポンスからJSONを解析できませんでした。レスポンスが途中で切れている可能性があります。\n\nレスポンス冒頭: ' + rawText.substring(0, 300));
     }
 
-    // Fill extracted text
-    const extractedText = aiAnalysisResult.extracted_text || '(テキスト抽出結果なし)';
-    document.getElementById('extractedText').textContent = extractedText;
-    textSection.classList.remove('hidden');
+    // Fill extracted text (if available)
+    const extractedText = aiAnalysisResult.extracted_text || '';
+    if (extractedText) {
+      document.getElementById('extractedText').textContent = extractedText;
+      textSection.classList.remove('hidden');
+    }
 
     // Fill form
     fillFormFromAI(aiAnalysisResult);
