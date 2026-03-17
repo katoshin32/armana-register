@@ -1538,10 +1538,11 @@ function buildPayload() {
     if (vBuilding) payload.visitor_address[0].building = vBuilding;
   }
 
-  addIfNotEmpty('visitor_gender', document.getElementById('f_visitor_gender').value);
-  const vAge = document.getElementById('f_visitor_age').value;
-  if (vAge) payload.visitor_age = parseInt(vAge);
-  addIfNotEmpty('visitor_client_channel', document.getElementById('f_client_channel').value);
+  if (!isVisitorSameAsPerson) {
+    addIfNotEmpty('visitor_gender', document.getElementById('f_visitor_gender').value);
+    const vAge = document.getElementById('f_visitor_age').value;
+    if (vAge) payload.visitor_age = parseInt(vAge);
+  }
 
   // Opponent
   addIfNotEmpty('opponent_company_name', document.getElementById('f_opponent_company_name').value);
