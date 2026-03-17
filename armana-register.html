@@ -1503,8 +1503,7 @@ function buildPayload() {
   }
 
   addIfNotEmpty('gender', document.getElementById('f_gender').value);
-  const age = document.getElementById('f_age').value;
-  if (age) payload.age = parseInt(age);
+  addIfNotEmpty('age', document.getElementById('f_age').value);
 
   // Visitor（visitor_target_relationが空 or 「本人」の場合はvisitor系を送信しない）
   const vRelation = document.getElementById('f_visitor_target_relation').value.trim();
